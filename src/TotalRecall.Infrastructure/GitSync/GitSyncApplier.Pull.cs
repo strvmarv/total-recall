@@ -22,6 +22,8 @@ public sealed partial class GitSyncApplier
     /// umbrella's "a missing file is never proof"): one whose entry ended failed, skipped or scan-skipped, so that its own
     /// transaction wrote no hold, gets an open <c>unproven</c> item from a fallback transaction of its own (see
     /// <see cref="HoldUnprovenCandidate"/>), and when that cannot be written the entry is deferred and <c>L</c> stays.
+    /// Before the preview a pre-pass (alias D2) computes the converging and ignored ids, which the preview does not count and
+    /// the unproven fallback never holds.
     /// Never throws for a bad record, a busy database or a failed entry; the token stops it between entries.
     /// </summary>
     public async Task<ApplyOutcome> ApplyAsync(FetchResult fetch, ScanSummary scan, CancellationToken cancellationToken = default)
@@ -108,8 +110,17 @@ public sealed partial class GitSyncApplier
 
         // The delete guard (D1 to D4). The blobs the preview read are taken by the loop, so no blob is read twice.
         var blobs = new Dictionary<string, GitOutcome<byte[]>>(StringComparer.Ordinal);
+        AliasPass aliases;
+        try
+        {
+            aliases = await PrepareAliases(ids, skippedByScan, view, rows, held, blobs, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is FormatException or SqliteException or InvalidOperationException or ArgumentException or InvalidCastException)
+        {
+            return new ApplyOutcome.Failed("the alias rows could not be read: " + OneLine(ex.Message)); // nothing is written yet
+        }
         var activeRows = rows.Values.Count(r => r.State.IsActive);
-        var preview = await PreviewDeletions(ids, skippedByScan, view, localDeletions, rows, held, fetch.Proven, activeRows, blobs, cancellationToken)
+        var preview = await PreviewDeletions(ids, skippedByScan, view, localDeletions, rows, held, fetch.Proven, activeRows, blobs, aliases, cancellationToken)
             .ConfigureAwait(false);
 
         int inserted = 0, updated = 0, dropped = 0, unchanged = 0, notAttempted = 0;
@@ -225,7 +236,9 @@ public sealed partial class GitSyncApplier
 
             // A deletion decided here for an id the preview did not count (the entry was deleted after the scan, or changed
             // concurrently) is carried out under this untripped verdict: an accepted race (D1).
-            Tally(ApplyOne(id, theirs, fetch.Proven, held.GetValueOrDefault(id), sha, preview.Verdict));
+            // Alias D3: a converging or ignored id is never decided as a deletion (convergence itself is carried out by a
+            // later step; until then a converging id takes the ignored path).
+            Tally(ApplyOne(id, theirs, fetch.Proven, held.GetValueOrDefault(id), sha, preview.Verdict, aliasIgnored: aliases.Excludes(id)));
 
             void Tally(EntryResult result)
             {
@@ -281,9 +294,12 @@ public sealed partial class GitSyncApplier
             }
 
             // An entry that ended failed, skipped or scan-skipped wrote no hold of its own: in an unproven pull a deletion
-            // candidate is held here, or deferred so that L stays (the umbrella's "a missing file is never proof").
+            // candidate is held here, or deferred so that L stays (the umbrella's "a missing file is never proof"). A converging
+            // or ignored id is never held here: its entry and row stay and the next pull tries again (alias D3).
             void HoldIfUnprovenCandidate()
             {
+                if (aliases.Excludes(id))
+                    return;
                 if (fetch.Proven || UnprovenCandidate(id, view, localDeletions, rows) is not { } candidate)
                     return;
                 var (fallback, notHeld) = HoldUnprovenCandidate(id, candidate.Direction, candidate.RecordSha);
@@ -368,9 +384,9 @@ public sealed partial class GitSyncApplier
     /// approved, included, so an entry with an open one is left alone and not counted) and nothing is written.
     /// <c>DeleteEntry</c> counts as remote, <c>PushDeletion</c> as local, except a <c>PushDeletion</c> an approved item
     /// answers (milestone 1b-iii, D4); a hold that the decision itself makes is not counted, nor is a candidate that
-    /// cannot be decided (the real decision reports it). A direction trips when its count is greater than
-    /// <c>max(10, activeRows * percent / 100)</c>. The blob reads (failed ones included) are left in <paramref name="blobs"/>
-    /// for the loop.
+    /// cannot be decided (the real decision reports it), nor a converging or ignored id of the alias pre-pass (alias D2). A
+    /// direction trips when its count is greater than <c>max(10, activeRows * percent / 100)</c>. A blob already in
+    /// <paramref name="blobs"/> is taken from it; the blob reads (failed ones included) are left there for the loop.
     /// </summary>
     private async Task<DeletionPreview> PreviewDeletions(
         IReadOnlyList<string> ids,
@@ -382,6 +398,7 @@ public sealed partial class GitSyncApplier
         bool proven,
         int activeRows,
         Dictionary<string, GitOutcome<byte[]>> blobs,
+        AliasPass aliases,
         CancellationToken cancellationToken)
     {
         int remote = 0, local = 0;
@@ -391,6 +408,8 @@ public sealed partial class GitSyncApplier
                 break; // the loop carries nothing out after a cancellation
             if (skippedByScan.ContainsKey(id))
                 continue;
+            if (aliases.Excludes(id))
+                continue;
 
             ParsedRecord? theirs = null;
             string? sha = null;
@@ -399,8 +418,11 @@ public sealed partial class GitSyncApplier
                 if (!localDeletions.Contains(id))
                     continue;
                 sha = record.Sha;
-                var blob = await _client.CatBlobAsync(record.Sha, SyncValidation.maxFileBytes, cancellationToken).ConfigureAwait(false);
-                blobs[id] = blob;
+                if (!blobs.TryGetValue(id, out var blob))
+                {
+                    blob = await _client.CatBlobAsync(record.Sha, SyncValidation.maxFileBytes, cancellationToken).ConfigureAwait(false);
+                    blobs[id] = blob;
+                }
                 if (!blob.IsOk)
                     continue;
                 theirs = RecordReader.Parse(blob.Value, record.Path).Parsed;

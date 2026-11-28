@@ -93,11 +93,14 @@ public sealed partial class GitSyncApplier
     /// postponed (conflict review D3): a text conflict is carried out and its loser filed as a <c>conflict</c> item. <paramref name="theirs"/> is null when the id has no accepted record;
     /// <paramref name="held"/> is the id's held-delete item, open or approved, as the pull read it (milestone 1b-ii, D8;
     /// milestone 1b-iii, D4), null when it has none; <paramref name="blobSha"/> is the record's blob id; <paramref name="guard"/> is the pull's delete guard verdict (required: <c>default</c> trips nothing),
-    /// which turns a deletion of a tripped direction into a held item with the cause <c>guard</c> (D4).
+    /// which turns a deletion of a tripped direction into a held item with the cause <c>guard</c> (D4). With
+    /// <paramref name="aliasIgnored"/> (an id the alias pre-pass found converging or ignored, alias D3) the decision is the
+    /// plain <c>Ignore</c>: the entry and its row stay, and its review items are reconciled as for any absent record.
     /// </summary>
-    internal EntryResult ApplyOne(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha, DeleteGuardVerdict guard)
+    internal EntryResult ApplyOne(
+        string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha, DeleteGuardVerdict guard, bool aliasIgnored = false)
     {
-        var result = ApplyCore(id, theirs, proven, held, blobSha, guard);
+        var result = ApplyCore(id, theirs, proven, held, blobSha, guard, aliasIgnored);
         return result switch
         {
             EntryResult.Failed failed => RecordFailure(id, blobSha, failed),
@@ -109,9 +112,11 @@ public sealed partial class GitSyncApplier
 
     /// <summary>
     /// The work of <see cref="ApplyOne"/> before its issue bookkeeping. An insert (W1) whose record's origin hash maps in
-    /// <c>import_log</c> to a different existing memory is skipped and recorded in <c>git_sync_alias</c> (alias D1).
+    /// <c>import_log</c> to a different existing memory is skipped and recorded in <c>git_sync_alias</c> (alias D1). With
+    /// <paramref name="aliasIgnored"/> the decision is replaced by <c>SyncAlias.ignored</c> (alias D3).
     /// </summary>
-    private EntryResult ApplyCore(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha, DeleteGuardVerdict guard)
+    private EntryResult ApplyCore(
+        string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha, DeleteGuardVerdict guard, bool aliasIgnored = false)
     {
         BeforeEntry?.Invoke(id);
         var conn = _store.Connection;
@@ -168,6 +173,9 @@ public sealed partial class GitSyncApplier
         }
 
         var (decision, approved) = Decide(row, oldBase, theirs, blobSha, local, proven, held);
+        // Alias D3: an open alias is never read as a deletion; the entry and its row stay (before the guard's conversion).
+        if (aliasIgnored)
+            decision = SyncAlias.ignored;
         // Alias D1: an insert (W1) whose record's origin hash maps in import_log to a different existing memory is skipped;
         // the alias rows are the only write, planned here and recomputed inside the transaction.
         AliasPlan? aliasPlan = null;
