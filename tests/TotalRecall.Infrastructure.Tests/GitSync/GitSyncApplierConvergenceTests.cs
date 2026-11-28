@@ -12,7 +12,8 @@ namespace TotalRecall.Infrastructure.Tests.GitSync;
 /// Alias D2, D3 (conditions) and D6 (git sync part 5, #165): before the deletion preview a pre-pass computes the converging
 /// and ignored ids; neither is counted by the delete guard, deleted, or held by the unproven fallback. The pre-pass fails
 /// closed: in a proven pull a blob or knowledge read it cannot make keeps every local id that could have converged; in an
-/// unproven pull the ids it cannot clear are left to the unproven hold, never ignored. The pre-pass tests assert
+/// unproven pull an id with a known candidate (an open row or a readable detection) is ignored, never held, and only an id
+/// with no known candidate is left to the unproven hold. The pre-pass tests assert
 /// what holds whether an id converges or is ignored: never deleted, never held, never counted, and
 /// <c>Has(x) || Has(canonical)</c> where a canonical is present. The convergence tests (alias D3 to D6) assert the re-key
 /// onto the canonical id and the first-sync merge that follows it, one test per row of D4's table.
@@ -454,7 +455,7 @@ public sealed class GitSyncApplierConvergenceTests
         Assert.Equal([$"{C}|{X}|{H}|open"], Aliases(rig));
     }
 
-    // ---- a failed check in an unproven pull: no ignore, the unproven hold applies ----
+    // ---- a failed check in an unproven pull: an id with alias evidence is ignored; one with none is held ----
 
     private static readonly string HOther = AliasTestSupport.Hash("another host file");
 
@@ -555,7 +556,7 @@ public sealed class GitSyncApplierConvergenceTests
     [GitTheory]
     [InlineData("other")]
     [InlineData("cancelled")]
-    public async Task InAnUnprovenPull_AFailedBlobReadOfTheLowestCandidate_HoldsX_NotConvergedNotDeleted(string kindName)
+    public async Task InAnUnprovenPull_AFailedBlobReadOfTheLowestCandidate_IgnoresX_NotHeldNotConvergedNotDeleted(string kindName)
     {
         var kind = kindName == "other" ? SyncGit.FailureKind.Other : SyncGit.FailureKind.Cancelled;
         var (rig, applier) = NewPull();
@@ -588,9 +589,10 @@ public sealed class GitSyncApplierConvergenceTests
         Assert.DoesNotContain(Aliases(rig), a => a.EndsWith("|resolved", StringComparison.Ordinal));
         if (kindName == "other")
         {
-            // The target is unknown (a, the lowest candidate, cannot be read): no ignore, the unproven hold applies.
-            Assert.Contains(summary.Held, h => h.Id == X);
-            Assert.True(GitSyncReviews.ReadOpenHeld(rig.Connection).ContainsKey(X));
+            // The target is unknown (a, the lowest candidate, cannot be read), but x has open rows: ignored, not held.
+            Assert.True(summary.Complete);
+            Assert.DoesNotContain(summary.Held, h => h.Id == X);
+            Assert.False(HasHeldRow(rig, X));
         }
         else
         {
@@ -606,12 +608,12 @@ public sealed class GitSyncApplierConvergenceTests
 
     /// <summary>
     /// <paramref name="withRow"/>: c also has a <c>forgotten</c> row, so c is no W1 candidate and the throwing knowledge
-    /// check is step 5's (is the target free?) rather than step 3's.
+    /// check is step 5's (is the target free?) rather than step 3's. Either way x has an open row: ignored, never held.
     /// </summary>
     [GitTheory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task InAnUnprovenPull_AnUnreadableKnowledgeCheckOnTheTarget_HoldsTheOther(bool withRow)
+    public async Task InAnUnprovenPull_AnUnreadableKnowledgeCheckOnTheTarget_IgnoresTheOther_NotHeld(bool withRow)
     {
         var (rig, applier) = NewPull();
         using var pullRig = rig;
@@ -619,6 +621,7 @@ public sealed class GitSyncApplierConvergenceTests
         InsertCorruptKnowledge(rig, C);
         if (withRow)
             GitSyncRows.Write(rig.Connection, new GitSyncRow(C, SyncMerge.RowState.Forgotten, RecordJson(Rec(C)), null, null, null, null, null, null, null, null, null, null, null, null));
+        var rowBefore = Row(rig, X);
 
         rig.Remove(SyncValidation.recordPath(X));
         rig.Commit("remove x");
@@ -626,27 +629,24 @@ public sealed class GitSyncApplierConvergenceTests
         var summary = await Pull(rig, applier);
 
         Assert.False(summary.Proven);
-        Assert.True(Has(rig, X));
-        Assert.Contains(summary.Held, h => h.Id == X);
-        Assert.True(GitSyncReviews.ReadOpenHeld(rig.Connection).ContainsKey(X));
+        AssertKept(rig, summary, X, rowBefore);
         Assert.Equal([$"{C}|{X}|{H}|open"], Aliases(rig));
 
         var next = await Pull(rig, applier); // asserts that nothing is deleted
 
         Assert.True(next.Proven);
-        Assert.True(Has(rig, X));
-        Assert.True(GitSyncReviews.ReadOpenHeld(rig.Connection).ContainsKey(X));
+        AssertKept(rig, next, X, rowBefore);
     }
 
     /// <summary>
     /// Step 4: the lowest candidate a has a <c>forgotten</c> row (so it is no W1 candidate and is read only as a canonical
-    /// record) and its blob read fails; b parses and is free. A proven pull ignores x (no convergence onto b); an unproven
-    /// pull leaves x's target unknown and the unproven hold applies. Either way x is not deleted.
+    /// record) and its blob read fails; b parses and is free. Both kinds of pull ignore x (no convergence onto b): a proven
+    /// pull fails closed, an unproven one leaves x's target unknown but x has open rows, so it is not held. Never deleted.
     /// </summary>
     [GitTheory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task AFailedReadOfTheLowestCanonicalRecord_NeverConvergesOntoTheHigher_IgnoredWhenProven_HeldWhenUnproven(bool proven)
+    public async Task AFailedReadOfTheLowestCanonicalRecord_NeverConvergesOntoTheHigher_IgnoredInBothKindsOfPull(bool proven)
     {
         var (rig, applier) = NewPull();
         using var pullRig = rig;
@@ -675,23 +675,16 @@ public sealed class GitSyncApplierConvergenceTests
         Assert.True(Has(rig, X));
         Assert.False(Has(rig, B));
         Assert.DoesNotContain(Aliases(rig), a => a.EndsWith("|resolved", StringComparison.Ordinal));
-        if (proven)
-        {
-            AssertKept(rig, summary, X, rowBefore);
-        }
-        else
-        {
-            Assert.Contains(summary.Held, h => h.Id == X);
-            Assert.True(GitSyncReviews.ReadOpenHeld(rig.Connection).ContainsKey(X));
-        }
+        AssertKept(rig, summary, X, rowBefore);
     }
 
     /// <summary>
     /// A failed check that concerns only one local id leaves the others' alias evidence standing in an unproven pull: an id
-    /// whose canonical record is gone stays ignored (not held), while the id whose target is unknown is held.
+    /// whose canonical record is gone stays ignored, and the id whose target is unknown is ignored too (it has an open row);
+    /// neither is held.
     /// </summary>
     [GitFact]
-    public async Task InAnUnprovenPull_AFailedCheckOfOneTarget_LeavesAnotherIdsRealIgnore()
+    public async Task InAnUnprovenPull_AFailedCheckOfOneTarget_IgnoresBothIdsWithOpenRows_HoldsNeither()
     {
         var (rig, applier) = NewPull();
         using var pullRig = rig;
@@ -710,9 +703,61 @@ public sealed class GitSyncApplierConvergenceTests
         Assert.False(summary.Proven);
         Assert.True(Has(rig, X));
         Assert.True(Has(rig, X2));
-        Assert.Contains(summary.Held, h => h.Id == X);
-        Assert.DoesNotContain(summary.Held, h => h.Id == X2);
+        Assert.Empty(summary.Held);
+        Assert.False(HasHeldRow(rig, X));
         Assert.False(HasHeldRow(rig, X2));
+    }
+
+    [GitFact]
+    public async Task InAnUnprovenPull_BothRecordsGoneAndAnUnrelatedFailedBlobRead_IgnoresTheIdWithAnOpenRow_NoHold()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        await SyncedPair(rig, applier, X, C);
+        var rowBefore = Row(rig, X);
+
+        rig.PutRecord(Rec(Y, "Use deno.", HOther));
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Remove(SyncValidation.recordPath(C));
+        rig.Commit("y added, x and c removed");
+        var yBlob = BlobOf(rig, Y);
+        rig.Fault = c => c.IsCatBlob && ((SyncGit.GitCommand.CatBlob)c).sha == yBlob ? FaultingGitProcess.Failure(SyncGit.FailureKind.Other, "bad object") : null;
+        rig.CloneGit("update-ref", "-d", "refs/total-recall/last-synced");
+        var summary = await Pull(rig, applier);
+
+        Assert.False(summary.Proven);
+        Assert.Equal(Y, Assert.Single(summary.Failed).Id);
+        AssertKept(rig, summary, X, rowBefore);
+        Assert.Empty(summary.Held);
+        Assert.Equal([$"{C}|{X}|{H}|open"], Aliases(rig));
+    }
+
+    [GitFact]
+    public async Task InAProvenPull_AFailedBlobReadOfARecordWithALocalMemory_DoesNotDelayTheDeletionOfAnotherMemory()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        rig.PutRecord(Rec(X));
+        rig.Commit("x");
+        await Pull(rig, applier);
+        Assert.True(Has(rig, X));
+
+        rig.PutRecord(Rec(Y, "Use deno.", HOther));
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Commit("y added, x removed");
+        var yBlob = BlobOf(rig, Y);
+        rig.Fault = c => c.IsCatBlob && ((SyncGit.GitCommand.CatBlob)c).sha == yBlob ? FaultingGitProcess.Failure(SyncGit.FailureKind.Other, "bad object") : null;
+        // A local memory under y with no row (written after the scan): not a W1 candidate, so the pre-pass does not read y.
+        var summary = await PullAllowingDeletions(rig, applier, scan =>
+        {
+            Assert.Null(Row(rig, Y));
+            rig.Store.Insert(Tier.Warm, ContentType.Memory, new InsertEntryOpts(Content: "Use deno.", Id: Y));
+            return scan;
+        });
+
+        Assert.True(summary.Proven);
+        Assert.Contains(X, summary.Deleted);
+        Assert.False(Has(rig, X));
     }
 
     [GitFact]

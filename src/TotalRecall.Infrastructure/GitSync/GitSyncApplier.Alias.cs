@@ -35,17 +35,18 @@ public sealed partial class GitSyncApplier
     /// held-delete item) take their candidates from their <c>open</c> alias rows and from the detections of this pull's
     /// arriving records (W1 candidates whose origin hash is one of the id's <c>import_log</c> hashes), each target is the
     /// lowest candidate whose record is accepted and parses, and <see cref="SyncAlias.choose"/> splits them into converging
-    /// and ignored ids. A W1 candidate's blob is read first; only one whose origin hash is a hash of an id of Q (its
-    /// <c>import_log</c> hashes or the hashes of its open rows) gets the local read and knowledge check, so a candidate that
-    /// can alias nothing here never fails the pre-pass. A read it cannot make (a blob read that is not ok, a relevant W1
-    /// candidate whose local read or knowledge check cannot be made, a candidate canonical record that cannot be read, a
-    /// target whose checks throw) fails closed, by the kind of pull: in a <paramref name="proven"/> pull it ignores every id
-    /// of Q (a target that cannot be checked is not free), which delays an ordinary deletion by one pull; in an unproven pull
-    /// it ignores nothing for the ids it leaves uncleared (every id of Q for a failed W1 blob read, else the ids whose
-    /// candidates or target it leaves unknown), so the unproven hold of W6.5 applies to them as for any vanished record, and
-    /// an ignore would let <c>L</c> advance past a deletion the next, proven pull then carries out. In such an unproven pull
-    /// the cleared ids keep their ignore, and an id that would converge is ignored instead (another member of its group may
-    /// be uncleared). Blobs are read through <paramref name="blobs"/>, so no blob is read twice. It never stops the pull.
+    /// and ignored ids. The pre-pass reads the blob of a W1 candidate only (an arriving record with no row, not skipped by
+    /// the scan, and no readable local memory under its id); only one whose origin hash is a hash of an id of Q (its
+    /// <c>import_log</c> hashes or the hashes of its open rows) also gets the knowledge check (and has its unreadable local
+    /// read counted), so a record that can alias nothing here never fails the pre-pass. A read it cannot make (a W1
+    /// candidate's blob read that is not ok, a relevant W1 candidate whose local read or knowledge check cannot be made, a
+    /// candidate canonical record that cannot be read (in an unproven pull, one lower than the id's target), a target whose free check throws) fails closed, by
+    /// the kind of pull. In a <paramref name="proven"/> pull it ignores every id of Q (a target that cannot be checked is not
+    /// free), which delays an ordinary deletion by one pull. In an unproven pull nothing converges, an id with a known
+    /// candidate (an open row, or a readable detection) is ignored, never held (it converges or is ignored whatever the
+    /// unknown), and an id with no known candidate gets nothing from the pre-pass, so the unproven hold of W6.5 applies to it
+    /// as before (an ignore would let <c>L</c> advance past a deletion the next, proven pull would carry out). Blobs are read
+    /// through <paramref name="blobs"/>, so no blob is read twice. It never stops the pull.
     /// </summary>
     private async Task<AliasPass> PrepareAliases(
         IReadOnlyList<string> ids,
@@ -94,13 +95,12 @@ public sealed partial class GitSyncApplier
         if (q.Count == 0)
             return AliasPass.None;
 
-        // Fail closed in a proven pull: every id of Q is kept for this pull and retried by the next. In an unproven pull an
-        // ignore would advance L past the vanished record without a hold, and the next (proven) pull would delete it: the ids
-        // a failed read leaves uncleared get nothing from the pre-pass, so the unproven hold applies to them.
+        // A read the pre-pass cannot make fails closed, by the kind of pull. Proven: every id of Q is ignored for this pull
+        // and retried by the next. Unproven: `unknown` is set; an ignore there lets L advance past the vanished record, so
+        // only ids with alias evidence may be ignored (see IgnoreKnown).
         var ignoreAll = new AliasPass(
             new Dictionary<string, ConvergeTarget>(StringComparer.Ordinal), q.ToHashSet(StringComparer.Ordinal));
-        var everyIdUncleared = proven ? ignoreAll : AliasPass.None;
-        var uncleared = new HashSet<string>(StringComparer.Ordinal);
+        var unknown = false;
 
         async Task<GitOutcome<byte[]>> Blob(string id, AcceptedRecord record)
         {
@@ -116,36 +116,44 @@ public sealed partial class GitSyncApplier
         // detection would write are kept per canonical id: a convergence onto it writes them too (D1), as the canonical
         // id's own visit may defer or fail in this pull and nothing detects them once the canonical id exists here.
         var detectedRows = new Dictionary<string, List<(string Other, string Hash)>>(StringComparer.Ordinal);
-        var hashesOf = q.ToDictionary(
-            x => x,
-            x => GitSyncAliases.HashesOf(conn, x).Concat(candidates[x].Select(c => c.Hash)).ToHashSet(StringComparer.Ordinal),
-            StringComparer.Ordinal);
-        var hashesOfQ = hashesOf.Values.SelectMany(h => h).ToHashSet(StringComparer.Ordinal);
+        var hashesOfQ = q
+            .SelectMany(x => GitSyncAliases.HashesOf(conn, x).Concat(candidates[x].Select(c => c.Hash)))
+            .ToHashSet(StringComparer.Ordinal);
         foreach (var id in ids)
         {
             if (!view.Accepted.TryGetValue(id, out var record) || rows.ContainsKey(id) || skippedByScan.ContainsKey(id)
                 || !SyncValidation.isEligibleId(id))
                 continue;
+            // A readable local memory under the id: not a W1 candidate, so its blob is not read here.
+            var local = TryReadLocal(id);
+            if (local is LocalRead.Present)
+                continue;
             var blob = await Blob(id, record).ConfigureAwait(false);
             if (!blob.IsOk)
-                return everyIdUncleared; // its origin is unknown: any id of Q may have lost a candidate
+            {
+                // Its origin is unknown: any id of Q may have lost a candidate. Keep scanning: the others still count.
+                if (proven)
+                    return ignoreAll;
+                unknown = true;
+                continue;
+            }
             if (RecordReader.Parse(blob.Value, record.Path).Parsed?.Record.Origin is not { } origin)
                 continue; // a record that does not parse cannot be inserted either; one with no origin aliases nothing
             var hash = origin.Value.Hash;
             if (!hashesOfQ.Contains(hash))
-                continue; // it can alias no id of Q: irrelevant, so its local read and knowledge check are not made
-            var entryHere = EntryHere(id);
-            if (entryHere is null)
+                continue; // it can alias no id of Q: irrelevant, so its local state is not checked
+            // Unreadable, in two tiers or a corrupt knowledge row: the entry's own visit skips it, so whether it is a W1
+            // candidate (and what it detects) is unknown.
+            var inKnowledge = local is LocalRead.Absent ? TryInKnowledge(id) : null;
+            if (inKnowledge is null)
             {
-                // Unreadable, in two tiers or a corrupt knowledge row: the entry's own visit skips it, so it is no proof of
-                // anything, and the ids of Q that share its origin hash are not cleared.
                 if (proven)
                     return ignoreAll;
-                uncleared.UnionWith(q.Where(x => hashesOf[x].Contains(hash)));
+                unknown = true;
                 continue;
             }
-            if (entryHere == true)
-                continue; // a local memory or a knowledge entry: not a W1 candidate
+            if (inKnowledge == true)
+                continue; // a knowledge entry: not a W1 candidate
             if (GitSyncAliases.PlanSkip(conn, id, hash) is not { } detection)
                 continue;
             var linked = false;
@@ -162,9 +170,11 @@ public sealed partial class GitSyncApplier
                 list.AddRange(detection.Inserts.Select(other => (other, hash)));
             }
         }
+        if (unknown)
+            return IgnoreKnown();
 
         // 4. The candidate canonical records accepted at R that parse. A read that is not ok is not "does not parse": in a
-        // proven pull it ignores Q; in an unproven pull the record is unknown (step 5 leaves the ids it may target uncleared).
+        // proven pull it ignores Q; in an unproven pull the record is unread (step 5 decides whether it matters).
         var parses = new Dictionary<string, (ParsedRecord Record, string Sha)>(StringComparer.Ordinal);
         var unread = new HashSet<string>(StringComparer.Ordinal);
         foreach (var canonical in candidates.Values.SelectMany(l => l.Select(c => c.Canonical)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
@@ -174,8 +184,10 @@ public sealed partial class GitSyncApplier
             var blob = await Blob(canonical, record).ConfigureAwait(false);
             if (!blob.IsOk)
             {
-                if (proven || blob.Failure.Failure == SyncGit.FailureKind.Cancelled || ct.IsCancellationRequested)
-                    return everyIdUncleared; // a cancelled read stops the pull anyway
+                if (proven)
+                    return ignoreAll;
+                if (blob.Failure.Failure == SyncGit.FailureKind.Cancelled || ct.IsCancellationRequested)
+                    return AliasPass.None; // a cancelled read stops the pull anyway
                 unread.Add(canonical);
                 continue;
             }
@@ -183,21 +195,21 @@ public sealed partial class GitSyncApplier
                 parses[canonical] = (parsed, record.Sha);
         }
 
-        // 5. Each id's target (condition 3) and whether it is free here (condition 5; a check that throws is not free in a
-        // proven pull and leaves the id uncleared in an unproven one). An id with an unread candidate lower than its target
-        // (or with no target) has an unknown target and is uncleared.
+        // 5. Each id's target (condition 3) and whether it is free here (condition 5). An unread candidate lower than the
+        // target (or with no target) makes the target unknown; a free check that throws is "not free" in a proven pull and
+        // unknown in an unproven one.
         var free = new Dictionary<string, bool?>(StringComparer.Ordinal);
         var parsing = SetModule.OfSeq(parses.Keys);
         var choices = new List<SyncAlias.Candidate>();
         foreach (var x in q)
         {
             var list = candidates[x];
-            if (list.Count == 0 || uncleared.Contains(x))
+            if (list.Count == 0)
                 continue;
             var target = SyncAlias.target(ListModule.OfSeq(list.Select(c => c.Canonical)), parsing);
             if (list.Any(c => unread.Contains(c.Canonical) && (target is null || string.CompareOrdinal(c.Canonical, target.Value) < 0)))
             {
-                uncleared.Add(x);
+                unknown = true;
                 continue;
             }
             var isFree = false;
@@ -208,22 +220,18 @@ public sealed partial class GitSyncApplier
                     free[t] = known = IsFree(t);
                 if (known is null && !proven)
                 {
-                    uncleared.Add(x);
+                    unknown = true;
                     continue;
                 }
                 isFree = known == true;
             }
             choices.Add(new SyncAlias.Candidate(x, target, isFree));
         }
+        if (unknown)
+            return IgnoreKnown();
 
-        // 6. At most one member per canonical id converges (condition 6); the others are ignored. With an uncleared id (an
-        // unproven pull only) nothing converges: an uncleared id may be the member that should, so the would-be converging
-        // ids are ignored for this pull, as every id was before; their alias evidence keeps them excluded on the next pull.
+        // 6. At most one member per canonical id converges (condition 6); the others are ignored.
         var choice = SyncAlias.choose(ListModule.OfSeq(choices));
-        if (uncleared.Count > 0)
-            return new AliasPass(
-                new Dictionary<string, ConvergeTarget>(StringComparer.Ordinal),
-                choice.Ignored.Concat(choice.Converging.Keys).ToHashSet(StringComparer.Ordinal));
         var converging = new Dictionary<string, ConvergeTarget>(StringComparer.Ordinal);
         foreach (var (x, t) in choice.Converging)
         {
@@ -235,6 +243,14 @@ public sealed partial class GitSyncApplier
             converging[x] = new ConvergeTarget(t, record, sha, hash, others);
         }
         return new AliasPass(converging, choice.Ignored.ToHashSet(StringComparer.Ordinal));
+
+        // An unproven pull with an unknown (a read it could not make): an id with a known candidate (an open row or a
+        // readable detection) converges or is ignored whatever the unknown (SyncAlias.choose; the unknown changes only
+        // which), so it is ignored and nothing converges in this pull. An id with no known candidate keeps the ordinary
+        // rules, so the unproven hold of W6.5 applies to it.
+        AliasPass IgnoreKnown() => new(
+            new Dictionary<string, ConvergeTarget>(StringComparer.Ordinal),
+            q.Where(x => candidates[x].Count > 0).ToHashSet(StringComparer.Ordinal));
 
         // Null when a check throws: unknown.
         bool? IsFree(string t)
@@ -249,18 +265,25 @@ public sealed partial class GitSyncApplier
             }
         }
 
-        // Whether a memory or knowledge entry exists here under the id (true: not a W1 candidate; false: one); null when that
-        // cannot be known (the local read throws, is unreadable or in two tiers, or the knowledge check throws).
-        bool? EntryHere(string id)
+        // Null when the local read throws.
+        LocalRead? TryReadLocal(string id)
         {
             try
             {
-                return ReadLocal(id) switch
-                {
-                    LocalRead.Present => true,
-                    LocalRead.Absent => InKnowledge(id) ? true : false,
-                    _ => null,
-                };
+                return ReadLocal(id);
+            }
+            catch (Exception ex) when (IsMappingFailure(ex))
+            {
+                return null;
+            }
+        }
+
+        // Null when the knowledge check throws.
+        bool? TryInKnowledge(string id)
+        {
+            try
+            {
+                return InKnowledge(id);
             }
             catch (Exception ex) when (IsMappingFailure(ex))
             {
