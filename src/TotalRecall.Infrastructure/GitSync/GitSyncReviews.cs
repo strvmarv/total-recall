@@ -44,7 +44,8 @@ internal sealed record ConflictItem(string EntryId, string State, string RecordH
 /// after it, and <see cref="ConflictItems"/> on top of them). Plain SQL on the caller's connection; every command carries the
 /// optional transaction, so the statements run inside an entry's <see cref="SqliteTransaction"/>. Every member's SQL is
 /// restricted to its own kind, except <see cref="HasAnyItem"/>, the one cross-kind read (alias convergence needs to know
-/// that an id has no review row of any kind).
+/// that an id has no review row of any kind; <see cref="RekeyConflictItem"/> uses it as its guard and writes only the
+/// <c>conflict</c> row).
 /// </summary>
 internal static class GitSyncReviews
 {
@@ -363,6 +364,24 @@ internal static class GitSyncReviews
         cmd.Transaction = tx;
         cmd.CommandText = "DELETE FROM git_sync_review WHERE entry_id = $id AND kind = 'conflict'";
         cmd.Parameters.AddWithValue("$id", entryId);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Alias convergence (D5): moves the <c>conflict</c> row (any state) of <paramref name="fromId"/> to
+    /// <paramref name="toId"/>, keeping its state, hash, machine, payload and <c>arrived_at</c>; no other kind is touched
+    /// and a missing row is a no-op. Throws <see cref="InvalidOperationException"/>, writing nothing, when
+    /// <paramref name="toId"/> already has a review row of any kind (the caller rules that out by condition 5).
+    /// </summary>
+    public static void RekeyConflictItem(MsSqliteConnection conn, string fromId, string toId, SqliteTransaction? tx = null)
+    {
+        if (HasAnyItem(conn, toId, tx))
+            throw new InvalidOperationException($"Cannot move the conflict item of '{fromId}': '{toId}' already has a review row");
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "UPDATE git_sync_review SET entry_id = $to WHERE entry_id = $from AND kind = 'conflict'";
+        cmd.Parameters.AddWithValue("$from", fromId);
+        cmd.Parameters.AddWithValue("$to", toId);
         cmd.ExecuteNonQuery();
     }
 

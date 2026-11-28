@@ -559,6 +559,43 @@ public sealed class GitSyncReviewsTests : IDisposable
     }
 
     [Fact]
+    public void RekeyConflictItem_MovesOnlyTheConflictRow()
+    {
+        var payload = GitSyncReviews.ConflictPayload([Loser(SyncMerge.Side.Local, "a")]);
+        InsertRow("x", "conflict", "unseen", hash: "h1", machine: "m1", payload: payload);
+        InsertRow("x", "new-pin", "open", hash: "pin", machine: "m2");
+        var conflictBefore = Row("x", "conflict");
+        var pinBefore = Row("x", "new-pin");
+
+        GitSyncReviews.RekeyConflictItem(_conn, "x", "c");
+        GitSyncReviews.RekeyConflictItem(_conn, "missing", "c2");
+
+        Assert.Equal("none", Row("x", "conflict"));
+        Assert.Equal(conflictBefore, Row("c", "conflict"));
+        Assert.Equal(pinBefore, Row("x", "new-pin"));
+        Assert.Equal("none", Row("c", "new-pin"));
+        Assert.Equal("2", Scalar("SELECT COUNT(*) FROM git_sync_review"));
+    }
+
+    [Theory]
+    [InlineData("conflict")]
+    [InlineData("new-pin")]
+    [InlineData("held-delete")]
+    public void RekeyConflictItem_RefusesATargetWithAnyReviewRow_AndWritesNothing(string kind)
+    {
+        InsertRow("x", "conflict", "open", hash: "h1");
+        InsertRow("c", kind, "open", hash: "other", direction: kind == "held-delete" ? "remote" : null);
+        var xBefore = Row("x", "conflict");
+        var cBefore = Row("c", kind);
+
+        Assert.Throws<InvalidOperationException>(() => GitSyncReviews.RekeyConflictItem(_conn, "x", "c"));
+
+        Assert.Equal(xBefore, Row("x", "conflict"));
+        Assert.Equal(cBefore, Row("c", kind));
+        Assert.Equal("2", Scalar("SELECT COUNT(*) FROM git_sync_review"));
+    }
+
+    [Fact]
     public void ThePinAndHeldMembers_StillIgnoreConflictRows()
     {
         InsertRow("k", "conflict", "open", hash: "h", payload: """{"losers":[]}""");
