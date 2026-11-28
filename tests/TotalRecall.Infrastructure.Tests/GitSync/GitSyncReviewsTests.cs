@@ -545,6 +545,20 @@ public sealed class GitSyncReviewsTests : IDisposable
     }
 
     [Fact]
+    public void HasAnyItem_IsTrueForARowOfAnyKindOrState()
+    {
+        InsertRow("a", "new-pin", "declined");
+        InsertRow("b", "pin-edit", "unseen");
+        InsertRow("c", "conflict", "open");
+        InsertRow("d", "held-delete", "resolved", direction: "remote");
+        InsertRow("e", "held-delete", "approved", direction: "local");
+
+        foreach (var id in new[] { "a", "b", "c", "d", "e" })
+            Assert.True(GitSyncReviews.HasAnyItem(_conn, id), id);
+        Assert.False(GitSyncReviews.HasAnyItem(_conn, "f"));
+    }
+
+    [Fact]
     public void ThePinAndHeldMembers_StillIgnoreConflictRows()
     {
         InsertRow("k", "conflict", "open", hash: "h", payload: """{"losers":[]}""");
