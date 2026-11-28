@@ -11,7 +11,8 @@ namespace TotalRecall.Infrastructure.Tests.GitSync;
 /// <summary>
 /// Alias D2, D3 (conditions) and D6 (git sync part 5, #165): before the deletion preview a pre-pass computes the converging
 /// and ignored ids; neither is counted by the delete guard, deleted, or held by the unproven fallback. The pre-pass fails
-/// closed: a blob or knowledge read it cannot make keeps every local id that could have converged. The pre-pass tests assert
+/// closed: in a proven pull a blob or knowledge read it cannot make keeps every local id that could have converged; in an
+/// unproven pull the ids it cannot clear are left to the unproven hold, never ignored. The pre-pass tests assert
 /// what holds whether an id converges or is ignored: never deleted, never held, never counted, and
 /// <c>Has(x) || Has(canonical)</c> where a canonical is present. The convergence tests (alias D3 to D6) assert the re-key
 /// onto the canonical id and the first-sync merge that follows it, one test per row of D4's table.
@@ -43,6 +44,14 @@ public sealed class GitSyncApplierConvergenceTests
     /// <summary>A pull; asserts that it deleted nothing and tripped no guard.</summary>
     private static async Task<ApplySummary> Pull(PullRig rig, GitSyncApplier applier, Func<ScanSummary, ScanSummary>? adjust = null)
     {
+        var summary = await PullAllowingDeletions(rig, applier, adjust);
+        Assert.Empty(summary.Deleted);
+        return summary;
+    }
+
+    /// <summary>A pull; asserts that it tripped no guard.</summary>
+    private static async Task<ApplySummary> PullAllowingDeletions(PullRig rig, GitSyncApplier applier, Func<ScanSummary, ScanSummary>? adjust = null)
+    {
         var fetch = await rig.Fetcher().FetchAsync();
         var result = fetch switch
         {
@@ -54,7 +63,6 @@ public sealed class GitSyncApplierConvergenceTests
         if (adjust is not null)
             scan = adjust(scan);
         var summary = Assert.IsType<ApplyOutcome.Done>(await applier.ApplyAsync(result, scan)).Summary;
-        Assert.Empty(summary.Deleted);
         Assert.Empty(summary.GuardTripped);
         return summary;
     }
@@ -397,7 +405,7 @@ public sealed class GitSyncApplierConvergenceTests
     [GitTheory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task ACorruptKnowledgeRowUnderTheArrivingCandidate_KeepsTheOther_NotDeletedNotHeld(bool proven)
+    public async Task ACorruptKnowledgeRowUnderTheArrivingCandidate_NeverDeletesTheOther_IgnoredWhenProven_HeldWhenUnproven(bool proven)
     {
         var (rig, applier) = NewPull();
         using var pullRig = rig;
@@ -414,9 +422,19 @@ public sealed class GitSyncApplierConvergenceTests
 
         Assert.Equal(proven, summary.Proven);
         Assert.Contains(summary.Skipped, s => s.Id == C);
-        AssertKept(rig, summary, X, rowBefore);
-        Assert.Empty(summary.Held);
         Assert.Empty(Aliases(rig));
+        if (proven)
+        {
+            AssertKept(rig, summary, X, rowBefore);
+            Assert.Empty(summary.Held);
+        }
+        else
+        {
+            // The check failed, so x is not cleared: no ignore, the unproven hold of W6.5 applies (a person's question).
+            Assert.True(Has(rig, X));
+            Assert.Contains(summary.Held, h => h.Id == X);
+            Assert.True(GitSyncReviews.ReadOpenHeld(rig.Connection).ContainsKey(X));
+        }
     }
 
     [GitFact]
@@ -434,6 +452,267 @@ public sealed class GitSyncApplierConvergenceTests
 
         AssertKept(rig, summary, X, rowBefore);
         Assert.Equal([$"{C}|{X}|{H}|open"], Aliases(rig));
+    }
+
+    // ---- a failed check in an unproven pull: no ignore, the unproven hold applies ----
+
+    private static readonly string HOther = AliasTestSupport.Hash("another host file");
+
+    /// <summary>
+    /// Syncs <see cref="X"/> alone with no alias (no twin <c>import_log</c> row, no alias row), then commits the removal of
+    /// its record and an unrelated record <see cref="Y"/> (another origin) whose pre-pass check fails: its blob read
+    /// (<paramref name="fault"/> <c>blob</c>) or its knowledge check (<c>knowledge</c>, a corrupt knowledge row under Y).
+    /// Returns the head.
+    /// </summary>
+    private static async Task<string> XAloneThenAFailingUnrelatedArrival(PullRig rig, GitSyncApplier applier, string fault, bool proven)
+    {
+        rig.PutRecord(Rec(X));
+        rig.Commit("x");
+        await Pull(rig, applier);
+        Assert.True(Has(rig, X));
+        Assert.Empty(Aliases(rig));
+        if (fault == "knowledge")
+            InsertCorruptKnowledge(rig, Y);
+        rig.PutRecord(Rec(Y, "Use deno.", HOther));
+        rig.Remove(SyncValidation.recordPath(X));
+        var head = rig.Commit("y added, x removed");
+        var yBlob = BlobOf(rig, Y);
+        if (fault == "blob")
+            rig.Fault = c => c.IsCatBlob && ((SyncGit.GitCommand.CatBlob)c).sha == yBlob ? FaultingGitProcess.Failure(SyncGit.FailureKind.Other, "bad object") : null;
+        if (!proven)
+            rig.CloneGit("update-ref", "-d", "refs/total-recall/last-synced");
+        return head;
+    }
+
+    [GitTheory]
+    [InlineData("blob")]
+    [InlineData("knowledge")]
+    public async Task InAnUnprovenPull_AFailedCheckOfAnUnrelatedArrival_StillHoldsAMemoryWithNoAlias_AndTheNextPullDeletesNothing(string fault)
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var head = await XAloneThenAFailingUnrelatedArrival(rig, applier, fault, proven: false);
+
+        var summary = await Pull(rig, applier);
+
+        Assert.False(summary.Proven);
+        Assert.True(summary.Complete);
+        Assert.Equal(head, rig.Last);
+        Assert.True(Has(rig, X));
+        Assert.Contains(summary.Held, h => h.Id == X);
+        Assert.True(GitSyncReviews.ReadOpenHeld(rig.Connection).ContainsKey(X));
+        if (fault == "blob")
+            Assert.Equal(Y, Assert.Single(summary.Failed).Id);
+        else
+            Assert.Contains(summary.Skipped, s => s.Id == Y);
+
+        rig.Fault = _ => null;
+        var next = await Pull(rig, applier); // asserts that nothing is deleted
+
+        Assert.True(next.Proven);
+        Assert.True(Has(rig, X));
+        Assert.True(GitSyncReviews.ReadOpenHeld(rig.Connection).ContainsKey(X));
+    }
+
+    [GitFact]
+    public async Task InAProvenPull_AFailedBlobReadOfAnUnrelatedArrival_DelaysTheOrdinaryDeletionByOnePull()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        await XAloneThenAFailingUnrelatedArrival(rig, applier, "blob", proven: true);
+        var rowBefore = Row(rig, X);
+
+        var summary = await Pull(rig, applier);
+
+        Assert.True(summary.Proven);
+        AssertKept(rig, summary, X, rowBefore);
+        Assert.Empty(summary.Held);
+        Assert.Equal(Y, Assert.Single(summary.Failed).Id);
+
+        rig.Fault = _ => null;
+        var next = await PullAllowingDeletions(rig, applier);
+
+        Assert.Contains(X, next.Deleted);
+        Assert.False(Has(rig, X));
+        Assert.True(Has(rig, Y));
+    }
+
+    [GitFact]
+    public async Task ACorruptKnowledgeRowUnderAnUnrelatedArrival_DoesNotStopTheProvenDeletionOfAnotherMemory()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        await XAloneThenAFailingUnrelatedArrival(rig, applier, "knowledge", proven: true);
+
+        var summary = await PullAllowingDeletions(rig, applier);
+
+        Assert.True(summary.Proven);
+        Assert.Contains(X, summary.Deleted);
+        Assert.False(Has(rig, X));
+        Assert.Contains(summary.Skipped, s => s.Id == Y);
+    }
+
+    [GitTheory]
+    [InlineData("other")]
+    [InlineData("cancelled")]
+    public async Task InAnUnprovenPull_AFailedBlobReadOfTheLowestCandidate_HoldsX_NotConvergedNotDeleted(string kindName)
+    {
+        var kind = kindName == "other" ? SyncGit.FailureKind.Other : SyncGit.FailureKind.Cancelled;
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        rig.PutRecord(Rec(X));
+        rig.Commit("x");
+        await Pull(rig, applier);
+        rig.PutRecord(Rec(B));
+        rig.Commit("b");
+        await Pull(rig, applier);
+        rig.PutRecord(Rec(A));
+        rig.Commit("a");
+        await Pull(rig, applier);
+        Assert.Equal([$"{A}|{X}|{H}|open", $"{B}|{X}|{H}|open"], Aliases(rig));
+
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Commit("remove x");
+        var aBlob = BlobOf(rig, A);
+        rig.Fault = c => c.IsCatBlob && ((SyncGit.GitCommand.CatBlob)c).sha == aBlob ? FaultingGitProcess.Failure(kind, "bad object") : null;
+        rig.CloneGit("update-ref", "-d", "refs/total-recall/last-synced");
+        var summary = await Pull(rig, applier);
+
+        Assert.False(summary.Proven);
+        Assert.True(Has(rig, X));
+        Assert.False(Has(rig, A));
+        Assert.False(Has(rig, B));
+        // An unproven pull visits b's unchanged record too, whose skip also opens a|b (b is not a memory here).
+        Assert.Contains($"{A}|{X}|{H}|open", Aliases(rig));
+        Assert.Contains($"{B}|{X}|{H}|open", Aliases(rig));
+        Assert.DoesNotContain(Aliases(rig), a => a.EndsWith("|resolved", StringComparison.Ordinal));
+        if (kindName == "other")
+        {
+            // The target is unknown (a, the lowest candidate, cannot be read): no ignore, the unproven hold applies.
+            Assert.Contains(summary.Held, h => h.Id == X);
+            Assert.True(GitSyncReviews.ReadOpenHeld(rig.Connection).ContainsKey(X));
+        }
+        else
+        {
+            Assert.False(summary.Complete); // a cancelled read stops the pull before x is visited
+        }
+
+        rig.Fault = _ => null;
+        await Pull(rig, applier); // asserts that nothing is deleted
+
+        Assert.True(Has(rig, X) || Has(rig, A));
+        Assert.False(Has(rig, B));
+    }
+
+    /// <summary>
+    /// <paramref name="withRow"/>: c also has a <c>forgotten</c> row, so c is no W1 candidate and the throwing knowledge
+    /// check is step 5's (is the target free?) rather than step 3's.
+    /// </summary>
+    [GitTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InAnUnprovenPull_AnUnreadableKnowledgeCheckOnTheTarget_HoldsTheOther(bool withRow)
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        await SyncedPair(rig, applier, X, C);
+        InsertCorruptKnowledge(rig, C);
+        if (withRow)
+            GitSyncRows.Write(rig.Connection, new GitSyncRow(C, SyncMerge.RowState.Forgotten, RecordJson(Rec(C)), null, null, null, null, null, null, null, null, null, null, null, null));
+
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Commit("remove x");
+        rig.CloneGit("update-ref", "-d", "refs/total-recall/last-synced");
+        var summary = await Pull(rig, applier);
+
+        Assert.False(summary.Proven);
+        Assert.True(Has(rig, X));
+        Assert.Contains(summary.Held, h => h.Id == X);
+        Assert.True(GitSyncReviews.ReadOpenHeld(rig.Connection).ContainsKey(X));
+        Assert.Equal([$"{C}|{X}|{H}|open"], Aliases(rig));
+
+        var next = await Pull(rig, applier); // asserts that nothing is deleted
+
+        Assert.True(next.Proven);
+        Assert.True(Has(rig, X));
+        Assert.True(GitSyncReviews.ReadOpenHeld(rig.Connection).ContainsKey(X));
+    }
+
+    /// <summary>
+    /// Step 4: the lowest candidate a has a <c>forgotten</c> row (so it is no W1 candidate and is read only as a canonical
+    /// record) and its blob read fails; b parses and is free. A proven pull ignores x (no convergence onto b); an unproven
+    /// pull leaves x's target unknown and the unproven hold applies. Either way x is not deleted.
+    /// </summary>
+    [GitTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AFailedReadOfTheLowestCanonicalRecord_NeverConvergesOntoTheHigher_IgnoredWhenProven_HeldWhenUnproven(bool proven)
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        rig.PutRecord(Rec(X));
+        rig.Commit("x");
+        await Pull(rig, applier);
+        rig.PutRecord(Rec(B));
+        rig.Commit("b");
+        await Pull(rig, applier);
+        rig.PutRecord(Rec(A));
+        rig.Commit("a");
+        await Pull(rig, applier);
+        Assert.Equal([$"{A}|{X}|{H}|open", $"{B}|{X}|{H}|open"], Aliases(rig));
+        GitSyncRows.Write(rig.Connection, new GitSyncRow(A, SyncMerge.RowState.Forgotten, RecordJson(Rec(A)), null, null, null, null, null, null, null, null, null, null, null, null));
+        var rowBefore = Row(rig, X);
+
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Commit("remove x");
+        var aBlob = BlobOf(rig, A);
+        rig.Fault = c => c.IsCatBlob && ((SyncGit.GitCommand.CatBlob)c).sha == aBlob ? FaultingGitProcess.Failure(SyncGit.FailureKind.Other, "bad object") : null;
+        if (!proven)
+            rig.CloneGit("update-ref", "-d", "refs/total-recall/last-synced");
+        var summary = await Pull(rig, applier);
+
+        Assert.Equal(proven, summary.Proven);
+        Assert.True(Has(rig, X));
+        Assert.False(Has(rig, B));
+        Assert.DoesNotContain(Aliases(rig), a => a.EndsWith("|resolved", StringComparison.Ordinal));
+        if (proven)
+        {
+            AssertKept(rig, summary, X, rowBefore);
+        }
+        else
+        {
+            Assert.Contains(summary.Held, h => h.Id == X);
+            Assert.True(GitSyncReviews.ReadOpenHeld(rig.Connection).ContainsKey(X));
+        }
+    }
+
+    /// <summary>
+    /// A failed check that concerns only one local id leaves the others' alias evidence standing in an unproven pull: an id
+    /// whose canonical record is gone stays ignored (not held), while the id whose target is unknown is held.
+    /// </summary>
+    [GitFact]
+    public async Task InAnUnprovenPull_AFailedCheckOfOneTarget_LeavesAnotherIdsRealIgnore()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        await SyncedPair(rig, applier, X, C);
+        var h2 = AliasTestSupport.Hash("second host file");
+        await SyncedPair(rig, applier, X2, A, hash: h2);
+        InsertCorruptKnowledge(rig, C);
+
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Remove(SyncValidation.recordPath(X2));
+        rig.Remove(SyncValidation.recordPath(A));
+        rig.Commit("remove x, x2 and a");
+        rig.CloneGit("update-ref", "-d", "refs/total-recall/last-synced");
+        var summary = await Pull(rig, applier);
+
+        Assert.False(summary.Proven);
+        Assert.True(Has(rig, X));
+        Assert.True(Has(rig, X2));
+        Assert.Contains(summary.Held, h => h.Id == X);
+        Assert.DoesNotContain(summary.Held, h => h.Id == X2);
+        Assert.False(HasHeldRow(rig, X2));
     }
 
     [GitFact]
@@ -719,8 +998,10 @@ public sealed class GitSyncApplierConvergenceTests
         Assert.Equal(0, ReviewRows(rig, X));
     }
 
-    [GitFact]
-    public async Task ADifferentText_TakesTheCanonicalText_AndFilesTheLocalTextAsAConflict()
+    [GitTheory]
+    [InlineData(true)]
+    [InlineData(false)] // criterion 14: an unproven convergence carries every local text, tag, tier and pin too
+    public async Task ADifferentText_TakesTheCanonicalText_AndFilesTheLocalTextAsAConflict(bool proven)
     {
         var (rig, applier) = NewPull();
         using var pullRig = rig;
@@ -728,7 +1009,7 @@ public sealed class GitSyncApplierConvergenceTests
         await SyncedRecords(rig, applier, R(X, "Use bun."), cRec);
         var vectors = Vectors(rig);
 
-        var s = await RemoveAndPull(rig, applier, X);
+        var s = await RemoveAndPull(rig, applier, X, proven);
 
         AssertConverged(rig, X, cRec, s, vectors);
         Assert.Equal("Use pnpm.", View(rig, C).View.Content.Text);
@@ -739,8 +1020,10 @@ public sealed class GitSyncApplierConvergenceTests
         Assert.Empty(PinsOf(rig, C));
     }
 
-    [GitFact]
-    public async Task APinnedEntryWithADifferentText_KeepsThePinText_AndHoldsAPinEdit()
+    [GitTheory]
+    [InlineData(true)]
+    [InlineData(false)] // criterion 14: an unproven convergence carries every local text, tag, tier and pin too
+    public async Task APinnedEntryWithADifferentText_KeepsThePinText_AndHoldsAPinEdit(bool proven)
     {
         var (rig, applier) = NewPull();
         using var pullRig = rig;
@@ -750,7 +1033,7 @@ public sealed class GitSyncApplierConvergenceTests
         rig.Store.SetSticky(ContentType.Memory, X, true);
         var vectors = Vectors(rig);
 
-        var s = await RemoveAndPull(rig, applier, X);
+        var s = await RemoveAndPull(rig, applier, X, proven);
 
         AssertConverged(rig, X, cRec, s, vectors);
         var view = View(rig, C).View;
@@ -819,8 +1102,10 @@ public sealed class GitSyncApplierConvergenceTests
         Assert.Equal("open", pin.State);
     }
 
-    [GitFact]
-    public async Task TheTags_AreTheUnion()
+    [GitTheory]
+    [InlineData(true)]
+    [InlineData(false)] // criterion 14: an unproven convergence carries every local text, tag, tier and pin too
+    public async Task TheTags_AreTheUnion(bool proven)
     {
         var (rig, applier) = NewPull();
         using var pullRig = rig;
@@ -828,7 +1113,7 @@ public sealed class GitSyncApplierConvergenceTests
         await SyncedRecords(rig, applier, R(X, tags: ["t-local"]), cRec);
         var vectors = Vectors(rig);
 
-        var s = await RemoveAndPull(rig, applier, X);
+        var s = await RemoveAndPull(rig, applier, X, proven);
 
         AssertConverged(rig, X, cRec, s, vectors);
         Assert.Equal(["t-local", "t-remote"], View(rig, C).View.Tags.ToList());

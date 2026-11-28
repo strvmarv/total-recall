@@ -113,7 +113,7 @@ public sealed partial class GitSyncApplier
         AliasPass aliases;
         try
         {
-            aliases = await PrepareAliases(ids, skippedByScan, view, rows, held, blobs, cancellationToken).ConfigureAwait(false);
+            aliases = await PrepareAliases(ids, skippedByScan, view, rows, held, blobs, fetch.Proven, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is FormatException or SqliteException or InvalidOperationException or ArgumentException or InvalidCastException)
         {
