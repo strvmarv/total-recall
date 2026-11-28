@@ -56,11 +56,15 @@ setting pointing elsewhere, and an automatic (threshold or overflow) compaction.
    `interactive` (a child that got a task prompt and one follow-up). `/fork` and `/clone` copy the entries of the parent's branch into
    the new file, with their **old timestamps**, so a session whose first entry after the header is older than the header's own
    `timestamp` is a fork or clone, never a child, whatever its turn count (checked on the author's files: the one real fork has 119
-   copied entries, all older than its header; none of the 796 other files with a parent has one). A fork made at the very first message
-   copies nothing, looks like a child and is `automated` until it passes two turns: a recorded limit. No pi session is marked
+   copied entries, all older than its header; none of the 796 other files with a parent has one). Every real pi file starts with a setup entry (`model_change` or `thinking_level_change`), and a fork at any message copies at least
+   that, so a `/fork` or `/clone` always has copied history. The recorded limits: a **real conversation created with
+   `newSession({parentSession})`** (the handoff example, RPC `new_session`) names a parent, copies nothing and is `automated` until it
+   passes two turns; and a pi-subagents child **reopened after the user forked** (pi-subagents reopens it with pi's `forkFrom`, which
+   writes a header naming the old child file and copies its entries) has copied history, so it is `interactive`, and the extension,
+   which no longer lists the old child as live, may write a marker for it until the user's next turn rewrites it. No pi session is marked
    `automated` by its wording: the long-prompt and opening-phrase rules of the Claude Code rule do not apply.
 3. **The whole file is archived in file order, abandoned branches included.** The archive is a record of what was said, and the text
-   of a branch the user left is still something said. A `branch_summary` entry is kept like a compaction summary (its own chunk type).
+   of a branch the user left is still something said. A `branch_summary` entry is kept as a compaction summary (it shares the `compaction-summary` chunk type and its ranking).
    `context_edit` entries change only what the model sees and are ignored: the text they hide stays archived. A fork or clone **carries a
    copy of its parent's entries, and the copy is archived under the fork's own session** (it is the fork's record; no entry ids are
    compared across files): a search can find the same words in both sessions (the two-chunks-per-session limit and the ranking are
@@ -99,7 +103,9 @@ It reads and never writes.
 **Enumeration.** `<root>/<project dir>/<file>.jsonl` (nested layout) or `<root>/<file>.jsonl` (flat layout, call 4), links skipped, as for Claude Code. The file name is
 `<timestamp>_<id>.jsonl`: the timestamp is `YYYY-MM-DDTHH-MM-SS-mmmZ` (24 characters), then `_`, then the id, which is 1 to 128
 characters of `A-Z a-z 0-9 . _ -`. A name that does not fit is counted in `Skipped`. The `HostSessionId` is the id (call 1); the
-header's own `id` is not compared, the name decides. The `SessionSource` path, size and mtime are as for Claude Code.
+header's own `id` is not compared, the name decides. Two files with the same id (`pi --session-id work` in two directories, an
+imported file) cannot both be archived: one is counted as skipped, as for Claude Code, and this is a recorded limit; an id over 128
+characters is skipped the same way. The `SessionSource` path, size and mtime are as for Claude Code.
 
 **Head.** The first complete line must be a `{"type": "session", "version": 3, ...}` header; its SHA-256 is the fingerprint, `cwd` and
 `timestamp` come from it, and two new members are added to `SessionHead`: `ParentSession` (a non-empty string `parentSession`) and
@@ -108,7 +114,7 @@ the first two lines, the second only for this). A first line that is not a versi
 no fingerprint, so the session is skipped and counted, as for Claude Code. Files of versions 1 and 2 are skipped the same way: pi
 rewrites such a file in place, header and entries, when it opens it, which would change its fingerprint and shift every offset after
 it was archived (the author's files are all version 3). When the header has no usable `cwd`, the project is unknown: the pi adapter
-has no project-folder-name fallback, because the `--<path>--` folder name does not decode safely.
+has no project-folder-name fallback, because the `--<path>--` folder name does not decode safely: the adapter gets a `UsesProjectFolderFallback` member (false for pi) that `TranscriptIngester` honours when it derives the project (no key, so the session has no project).
 
 **Records.** `IsLineStart` and the byte-exact line reading are the same machinery as for Claude Code (`JsonlLineReader`); a line that
 is not JSON, is too long, or nests deeper than the limit counts as skipped; a blank line is not counted. `Ts` is the entry's ISO
@@ -151,18 +157,23 @@ the start). The kind is stored and can be re-evaluated, as the parent says.
 (`ClaudeCodeAdapter.IsValidId`) becomes `ITranscriptAdapter.IsValidSessionId`, and "the file is named `<id>.jsonl`" becomes
 `ITranscriptAdapter.IsSessionFileName(fileName, id)` (pi: the name is `<timestamp>_<id>.jsonl` with the timestamp of section 1). Every
 other refusal stays (size, `v`, `host_pid` equal to the name, an absolute `cwd`, a path with no `.` or `..` under the adapter's root
-with exactly `SessionPathDepth` components below it, neither a link, a process start check). `TranscriptSyncService`, `ArchivePass` and
+with exactly `SessionPathDepth` components below it, neither a link (the check covers the components below the root; the root itself is resolved as for Claude Code), a process start check). `TranscriptSyncService`, `ArchivePass` and
 `TranscriptBackfill` already work per adapter and need no change for this.
 
 **Extension side.** A new module of the pi package writes the marker for the user's session:
 
 - **When.** At `session_start` (every reason, so `/new`, `/resume` and `/fork` rewrite it for the new session), `before_agent_start`,
-  `turn_start` and `turn_end`, only when the extension's own `hookable` rule holds (so never for a child, for a `PI_SUBAGENT_ID`
-  process or for a session with no session file) and the platform is not Windows, and **only when the session file exists on disk**:
-  pi creates it when the first message is persisted (observed in pi's code, not in a run), so a marker written earlier would be refused
-  by the finder ("the session file does not exist"). The repeated calls make the marker appear with the first turn; a call that finds
-  an identical marker skips the write. At `session_start` it also prunes the markers of ended pi processes, as the Claude Code hook
-  does at `SessionStart`.
+  `tool_call` and `turn_end`, only when the extension's own `hookable` rule holds (so never for a child, for a `PI_SUBAGENT_ID`
+  process or for a session with no session file) and the platform is not Windows. The marker names a session only **once its file
+  exists on disk**: pi creates the file when the first message is persisted, and in pi's order `before_agent_start` and `turn_start`
+  run before that, so a marker written earlier would be refused by the finder ("the session file does not exist"). `tool_call`
+  runs after the assistant message that makes the call, which is after the file exists, and before the tool runs, so the marker is
+  there for the first transcript tool call of a new session. When the session file does not exist yet, `session_start` and
+  `before_agent_start` **remove this process's marker** (`remove` is added to the shared writer), so that after `/new` the previous
+  session's marker is never read for the new one; the finder then falls back to the guess and the working-directory default. A call
+  that finds an identical marker skips the write. At `session_start` it also prunes the markers of ended pi processes, as the Claude
+  Code hook does at `SessionStart`. The builder checks the event order against pi's code and the manual check observes that the marker
+  exists before the first transcript tool call.
 - **Which archive.** The data directory is resolved as the engine does (`resolveDataDir` over the environment and, when pi follows a
   hand-configured `total-recall` server, that server's `TOTAL_RECALL_*` values; a server that cannot be followed means no marker). With
   the archive off (no `<data directory>/live/enabled`) the module writes nothing.
@@ -176,10 +187,11 @@ with exactly `SessionPathDepth` components below it, neither a link, a process s
 
 **The breadcrumb.** `session_compact` already queues the instructions for the next prompt. It now appends the note when the archive is
 on (the same sentinel test as the marker), so the hidden message of the next `before_agent_start` carries both, once. The note is
-owed from a compaction until a `total-recall-context` message follows it: `session_tree` and a reload, which requeue the text, add the
-note again exactly when the active branch's last `compaction` entry has no `total-recall-context` message after it (stateless, read
-from the session; the same check the extension already makes for reload). A failed or cancelled compaction fires no `session_compact`
-and adds nothing. The note is the text of the Claude Code hook (call 6), and `total-recall-context` messages are dropped by the
+owed from a compaction until a `total-recall-context` message follows it, so there is **one rule wherever the queue is filled** (every
+`session_start` reason including `/resume`, `session_tree`, `session_compact`): append the note when the archive is on and the active
+branch's last `compaction` entry has no `total-recall-context` message after it (stateless, read from the session). A failed or cancelled compaction fires no `session_compact`
+and adds nothing. An automatic compaction inside a run queues the note, which reaches the model with the next user prompt (as the
+existing instructions do), not the next model turn within the run; `docs/hosts/pi.md` says so. The note is the text of the Claude Code hook (call 6), and `total-recall-context` messages are dropped by the
 adapter, so the note is never archived.
 
 ## 5. The default project from the working directory
@@ -216,12 +228,14 @@ Server and Cli test projects like `ClaudeFixtureHome`).
 1. `PiAdapterTests`: root resolution (each variable, `~` and `~/` expansion, other relative and empty cases), both layouts (a flat
    `PI_CODING_AGENT_SESSION_DIR` directory is enumerated and its markers accepted; the nested default too), enumeration (names, ids,
    skipped names, links, an empty file), head (fingerprint, cwd, parent, copied history, a version 1 or 2 file skipped and counted, a
-   first line that is not a header, a header with no `cwd` gives an unknown project), line starts, bad lines.
+   first line that is not a header, a header with no `cwd` gives a head with no cwd; and at ingest the session then has no project and no folder-name key), line starts, bad lines.
 2. `PiRecordMapperTests`: every row of section 2 on a line written for it, the stub detail order, the 500-character error cut after
    redaction, string and array user content, an unknown entry type.
 3. Kind: `SessionKindRule` with `isChild` (null keeps every Claude Code case as before; true with 1, 2, 3 turns; false with a long
    first prompt stays `interactive`); an ingest where a child grows from 2 to 3 turns and flips; a fork made after one turn (one copied
-   user turn plus the edited one) and a clone stay `interactive`; a fork made at the first message is `automated` (the limit).
+   user turn plus the edited one), a clone, and a fork at the first message (only setup entries copied) stay `interactive`; a session
+   that names a parent and copies nothing (the `newSession({parentSession})` limit) is `automated`; a copy of a child file reopened by
+   pi-subagents (copied history) is `interactive` (the limit, pinned so a change shows).
 4. The corpus: `backfill` of the pi fixtures stores the sessions and chunks per project and kind (the child and the follow-up
    `automated`, the fork, its parent and the early fork `interactive`; the copied text is stored under the fork), a second run adds nothing, injected text and hidden messages are not stored, the branch's
    abandoned text and the branch summary are, planted secrets are stored only as markers, a deleted source keeps its chunks, forgotten
@@ -234,7 +248,8 @@ Server and Cli test projects like `ClaudeFixtureHome`).
    process, in both layouts); a project default from the working directory reaches `Plan` while `currentSession` stays `guessed`; the project default from the working directory (inside a repository, outside one, the host unknown, the host `claude-code`,
    an explicit argument); the guess across both hosts.
 8. The extension (`pi/*.test.js`, in `test:shim`): the marker is written at `session_start` and at each turn once the session file exists
-   (and not before), with mode 0600 in a 0700 directory, rewritten for a new session id, absent for a child, for `PI_SUBAGENT_ID`, for a
+   (and not before: the events are driven in pi's real order, and the marker exists before the first `tool_call` of a new session), removed at
+   `session_start` of a new session with no file so that no marker names the previous session after `/new`, with mode 0600 in a 0700 directory, rewritten for a new session id, absent for a child, for `PI_SUBAGENT_ID`, for a
    session with no file, with the archive off, on Windows, with an unfollowable server; two
    extension instances in one process (a user session and a child) leave one marker, naming the user's session; the breadcrumb is in
    the hidden message after `session_compact` once; added again by `session_tree` and by a reload when no context message has followed the last compaction, and not when one has; absent after a failed compaction and with the archive off; the breadcrumb text
