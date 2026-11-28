@@ -266,6 +266,25 @@ items moved to 1b-iii, see that section):
 - [ ] Given the command line help, when it is shown, then the review commands are not listed.
 - [ ] Given the existing automated checks, the shim tests, the tool catalog check and the release build, when they run, then they pass and the release build shows no new warning, and nothing but the cycle and its tests runs a cycle.
 
+### 1b-iii part 5. Alias detection and skip-insert (#165)
+- [ ] Given a pulled record whose origin matches a different memory this machine already has (a legacy import, or a copy it pulled earlier), when the pull runs, then no duplicate appears, the pull completes as usual, and the two ids are recorded as one group whose canonical id is the lowest.
+- [ ] Given that same pull is run again, when it runs, then nothing changes and no second group is recorded.
+- [ ] Given the two records of a pair arrive together, in separate syncs, or in either order, when they are pulled, then the final state is the same: one memory (under either id of the pair) and one recorded group.
+- [ ] Given a record whose origin matches no existing local memory (a typed memory, a deleted twin, or the record's own id), when it is pulled, then it is inserted as before and no group is recorded.
+- [ ] Given a pull that skips a record because of a group, when it runs, then it does not hold back the sync pointer, does not skip the push, and does not count toward the deletion guard.
+- [ ] Given a machine that holds the non-canonical memory and a pull that carries both the canonical record's add and the other record's removal, when it runs, then the removal is not read as a deletion and the machine ends with one memory under the canonical id, whichever order the records are processed in.
+- [ ] Given that convergence, when it completes, then the memory's tags are the union of both sides', its tier and its local pin are kept as for a first sync of a memory that exists on both sides, and the old memory is gone.
+- [ ] Given the local text differs from the canonical record's, when it converges, then the canonical text is applied and the local text is listed for review as a conflict; and when the local memory is pinned, the pin text stays and the canonical text waits as a held edit for review.
+- [ ] Given the canonical record is pinned and the local memory is not, when it converges, then the memory stays unpinned and the pin goes to pin review.
+- [ ] Given the old memory had listed conflicts or waiting pin reviews, when it converges, then its earlier losing texts are listed on the canonical memory (within the review limit, the newest local text always kept) and its waiting pin reviews are removed.
+- [ ] Given an open group whose canonical record is also gone, when the other record disappears, then nothing is deleted, no deletion is held, and the memory is kept.
+- [ ] Given a group whose old memory has a held deletion waiting for the person, when the other record disappears, then the person's pending question stands and nothing is decided for them.
+- [ ] Given a group whose shared memory already exists on this machine, or a group with several memories on this machine whose other records disappear together, when it is pulled, then only one memory converges and the others are kept (never deleted because of an open pair).
+- [ ] Given a pull that cannot prove its history (a first or reset pull), when it meets a group, then the skip is decided the same way and a convergence still carries every local text, tag, tier and pin.
+- [ ] Given a convergence that fails part-way, when the pull ends, then nothing was changed and the next pull tries again.
+- [ ] Given the other record reappears after convergence, when it is pulled, then it is skipped as a group member and no memory is inserted under its id.
+- [ ] Given the existing automated checks, the shim tests, the tool catalog check and the release build, when they run, then they pass and the release build shows no new warning, and nothing but the cycle and its tests runs a cycle.
+
 ## 2. Automatic sync
 - [ ] Only the MCP server runs the timer; the CLI and web UI never start one.
 - [ ] A remote whose head equals `L` costs one `ls-remote` and no fetch.

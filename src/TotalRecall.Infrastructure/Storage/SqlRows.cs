@@ -164,6 +164,36 @@ VALUES
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Change the id of one content row in place (<c>UPDATE ... SET id</c>), so the rowid, and with it the vector and
+    /// FTS rows, stays; no other column changes. Throws <see cref="InvalidOperationException"/> unless exactly one row
+    /// changed.
+    /// </summary>
+    public static void RekeyRow(
+        MsSqliteConnection conn, SqliteTransaction? tx, string table, string oldId, string newId)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = $"UPDATE {table} SET id = $new WHERE id = $old";
+        cmd.Parameters.AddWithValue("$old", oldId);
+        cmd.Parameters.AddWithValue("$new", newId);
+        var changed = cmd.ExecuteNonQuery();
+        if (changed != 1)
+            throw new InvalidOperationException($"Re-key of '{oldId}' in {table} changed {changed} rows, not 1");
+    }
+
+    /// <summary>Point every row of <paramref name="table"/> whose <c>parent_id</c> is <paramref name="oldId"/> at <paramref name="newId"/>; no other column changes.</summary>
+    public static void RekeyParent(
+        MsSqliteConnection conn, SqliteTransaction? tx, string table, string oldId, string newId)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = $"UPDATE {table} SET parent_id = $new WHERE parent_id = $old";
+        cmd.Parameters.AddWithValue("$old", oldId);
+        cmd.Parameters.AddWithValue("$new", newId);
+        cmd.ExecuteNonQuery();
+    }
+
     // Sticky is hot-only: both operate on the hot_* table regardless of
     // caller intent, since only those tables carry the `sticky` column.
     public static void SetStickyRow(

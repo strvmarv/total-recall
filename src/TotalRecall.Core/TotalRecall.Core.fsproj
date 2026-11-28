@@ -25,6 +25,7 @@
     <Compile Include="SyncApply.fs" />
     <Compile Include="SyncPin.fs" />
     <Compile Include="SyncConflict.fs" />
+    <Compile Include="SyncAlias.fs" />
     <Compile Include="SyncPush.fs" />
     <Compile Include="SyncCycle.fs" />
     <Compile Include="Tokenizer.fs" />

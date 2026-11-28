@@ -89,7 +89,11 @@ public abstract record ApplyOutcome
 /// pull. No decision is postponed (D19; pin review D3; conflict review D3): a decision with a <c>NewPin</c> or <c>PinEdit</c>
 /// request is carried out and writes its pin item by the arrival rule, and a text conflict (FC4, FC5, NC4) applies or keeps
 /// the clock's winner and files the losing text as a <c>conflict</c> item in the same transaction. In an unproven pull a
-/// deletion candidate whose entry failed or was skipped is still held before <c>L</c> moves (D5). Nothing calls it yet.
+/// deletion candidate whose entry failed or was skipped is still held before <c>L</c> moves (D5). An insert (W1) whose
+/// record's origin hash maps in <c>import_log</c> to a different existing memory is skipped and recorded in
+/// <c>git_sync_alias</c> (alias D1). A memory whose record disappeared under an open alias converges onto the canonical
+/// record in one transaction (alias D3): it is re-keyed and the canonical record is applied as a first sync; it is never
+/// read as a deletion. Nothing calls it yet.
 /// </summary>
 public sealed partial class GitSyncApplier
 {
@@ -119,7 +123,10 @@ public sealed partial class GitSyncApplier
     /// (<c>insert-row</c>, <c>update</c>, <c>move-copy</c>, <c>replace-vec</c>, <c>delete-vec</c>, <c>log-import</c>, ...) are
     /// forwarded, and the applier adds <c>reread</c>, <c>row</c>, <c>close</c> (a held-delete item removed), <c>hold</c> (one
     /// written), <c>issue</c> and <c>commit</c>; <c>hold-unproven</c> is the fallback hold of an unproven pull, in its own
-    /// transaction after the entry's.
+    /// transaction after the entry's. <c>alias</c> writes the open rows of an alias skip (alias D1). A convergence (alias D3)
+    /// adds <c>rekey</c> (the entry and its conflict item re-keyed, with the store's <c>rekey-row</c> and <c>rekey-parent</c>)
+    /// and <c>converge</c> (the other id's row, issue and pin items removed, its <c>import_log</c> rows retargeted, the alias
+    /// resolved); its steps are reported with the other id, the id the pull visited.
     /// </summary>
     internal Action<string, string>? BeforeEntryStep { get; set; }
 

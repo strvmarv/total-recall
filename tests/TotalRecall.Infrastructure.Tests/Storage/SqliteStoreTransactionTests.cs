@@ -341,7 +341,9 @@ public class SqliteStoreTransactionTests
                 tx.Insert(Tier.Warm, ContentType.Memory,
                     new InsertEntryOpts("extra", Id: "extra"), Embed("extra"));
                 tx.BeforeStep = FailAt(step);
-                Assert.Throws<InvalidOperationException>(() => op(tx));
+                // The injected fault, not a refusal (also an InvalidOperationException), so the test cannot pass vacuously.
+                var ex = Assert.Throws<InvalidOperationException>(() => op(tx));
+                Assert.Equal("injected at " + step, ex.Message);
             }
 
             Assert.Equal(before, StoreSnapshot.Take(conn));
@@ -708,6 +710,186 @@ public class SqliteStoreTransactionTests
     public void FailureAtEachMoveStep_RollsBack(string step) =>
         AssertFailureRollsBack(step,
             tx => tx.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, "id-1"),
+            store => SeedHot(store, "id-1", "x"));
+
+    // ---- git sync alias convergence: RekeyMemory (#165, D3 step 2) ----
+
+    private const string OldId = "3f9c2a7e-0000-4000-8000-0000000000b2";
+    private const string NewId = "3f9c2a7e-0000-4000-8000-0000000000a1";
+
+    /// <summary>Every column of the row with this id except <c>id</c>, as one line (blobs as hex), or null.</summary>
+    private static string? RawRowExceptId(MsSqliteConnection conn, string table, string id)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT * FROM {table} WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        using var r = cmd.ExecuteReader();
+        if (!r.Read()) return null;
+        var sb = new System.Text.StringBuilder();
+        for (var i = 0; i < r.FieldCount; i++)
+        {
+            if (r.GetName(i) == "id") continue;
+            sb.Append(r.GetName(i)).Append('=');
+            sb.Append(r.IsDBNull(i) ? "NULL"
+                : r.GetValue(i) is byte[] b ? Convert.ToHexString(b)
+                : Convert.ToString(r.GetValue(i), System.Globalization.CultureInfo.InvariantCulture));
+            sb.Append('|');
+        }
+        return sb.ToString();
+    }
+
+    private static string? IdAtFtsMatch(MsSqliteConnection conn, string table, string word)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            $"SELECT t.id FROM {table}_fts f JOIN {table} t ON t.rowid = f.rowid WHERE {table}_fts MATCH $w";
+        cmd.Parameters.AddWithValue("$w", word);
+        return cmd.ExecuteScalar() as string;
+    }
+
+    private static string? ParentOf(MsSqliteConnection conn, string table, string id)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT parent_id FROM {table} WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        return cmd.ExecuteScalar() as string;
+    }
+
+    private static void SeedRekeySource(SqliteStore store, MsSqliteConnection conn)
+    {
+        store.InsertWithEmbedding(Tier.Hot, ContentType.Memory,
+            new InsertEntryOpts("Prefer zebracorn builds.", Summary: "sum", Source: "src.md",
+                Tags: new[] { "a", "b" }, MetadataJson: """{"k":"v"}""", Id: OldId, CreatedAt: 1_000L),
+            Embed("Prefer zebracorn builds."));
+        store.SetSticky(ContentType.Memory, OldId, true);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"UPDATE hot_memories SET access_count = 7, decay_score = 0.25 WHERE id = '{OldId}'";
+        cmd.ExecuteNonQuery();
+    }
+
+    [Fact]
+    public void RekeyMemory_KeepsRowidVectorFtsAndEveryColumn()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedRekeySource(store, conn);
+            var rowBefore = RawRowExceptId(conn, "hot_memories", OldId);
+            var rowid = ScalarLong(conn, $"SELECT rowid FROM hot_memories WHERE id = '{OldId}'");
+            var vecCount = ScalarLong(conn, "SELECT count(*) FROM hot_memories_vec");
+            var vecBytes = VecRows.ReadBytes(conn, null, "hot_memories_vec", rowid);
+
+            using (var tx = store.BeginTransaction())
+            {
+                tx.RekeyMemory(Tier.Hot, OldId, NewId);
+                tx.Commit();
+            }
+
+            Assert.NotNull(store.Get(Tier.Hot, ContentType.Memory, NewId));
+            Assert.Null(store.Get(Tier.Hot, ContentType.Memory, OldId));
+            Assert.Equal(rowBefore, RawRowExceptId(conn, "hot_memories", NewId));
+            Assert.Equal(rowid, ScalarLong(conn, $"SELECT rowid FROM hot_memories WHERE id = '{NewId}'"));
+            Assert.Equal(vecCount, ScalarLong(conn, "SELECT count(*) FROM hot_memories_vec"));
+            Assert.Equal(vecBytes, VecRows.ReadBytes(conn, null, "hot_memories_vec", rowid));
+            Assert.Equal(NewId, IdAtFtsMatch(conn, "hot_memories", "zebracorn"));
+            Assert.True(store.IsSticky(ContentType.Memory, NewId));
+            var hit = Assert.Single(new VectorSearch(conn).SearchByVector(
+                Tier.Hot, ContentType.Memory, Embed("Prefer zebracorn builds."), new VectorSearchOpts(5)));
+            Assert.Equal(NewId, hit.Id);
+            var fts = Assert.Single(new FtsSearch(conn).SearchByFts(
+                Tier.Hot, ContentType.Memory, "zebracorn", new FtsSearchOpts(5)));
+            Assert.Equal(NewId, fts.Id);
+        }
+    }
+
+    [Fact]
+    public void RekeyMemory_RewritesParentIdInEveryContentTable()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedRekeySource(store, conn);
+            store.Insert(Tier.Warm, ContentType.Memory, new InsertEntryOpts("child one", ParentId: OldId, Id: "child-1"));
+            store.Insert(Tier.Cold, ContentType.Knowledge, new InsertEntryOpts("child two", ParentId: OldId, Id: "child-2"));
+            store.Insert(Tier.Hot, ContentType.Knowledge, new InsertEntryOpts("other", ParentId: "someone-else", Id: "child-3"));
+
+            using (var tx = store.BeginTransaction())
+            {
+                tx.RekeyMemory(Tier.Hot, OldId, NewId);
+                tx.Commit();
+            }
+
+            Assert.Equal(NewId, ParentOf(conn, "warm_memories", "child-1"));
+            Assert.Equal(NewId, ParentOf(conn, "cold_knowledge", "child-2"));
+            Assert.Equal("someone-else", ParentOf(conn, "hot_knowledge", "child-3"));
+            Assert.Equal(0, ScalarLong(conn,
+                "SELECT (SELECT count(*) FROM hot_memories WHERE parent_id = '" + OldId + "') + " +
+                "(SELECT count(*) FROM warm_memories WHERE parent_id = '" + OldId + "') + " +
+                "(SELECT count(*) FROM cold_knowledge WHERE parent_id = '" + OldId + "')"));
+        }
+    }
+
+    [Fact]
+    public void RekeyMemory_RefusesAMissingSourceOrATakenTarget()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedRekeySource(store, conn);
+            store.Insert(Tier.Warm, ContentType.Memory, new InsertEntryOpts("child", ParentId: OldId, Id: "child-1"));
+            store.Insert(Tier.Warm, ContentType.Knowledge, new InsertEntryOpts("taken", Id: "taken-id"));
+            var before = StoreSnapshot.Take(conn);
+
+            using (var tx = store.BeginTransaction())
+            {
+                // absent in the given tier (it is in hot, not warm), and absent everywhere
+                Assert.Throws<InvalidOperationException>(() => tx.RekeyMemory(Tier.Warm, OldId, NewId));
+                Assert.Throws<InvalidOperationException>(() => tx.RekeyMemory(Tier.Hot, "no-such-id", NewId));
+                // the target is an id in another table (knowledge), or the same table
+                Assert.Throws<InvalidOperationException>(() => tx.RekeyMemory(Tier.Hot, OldId, "taken-id"));
+                Assert.Throws<InvalidOperationException>(() => tx.RekeyMemory(Tier.Hot, OldId, "child-1"));
+                Assert.Throws<InvalidOperationException>(() => tx.RekeyMemory(Tier.Hot, OldId, OldId));
+                Assert.Equal(before, StoreSnapshot.Take(conn));
+            }
+
+            Assert.Equal(before, StoreSnapshot.Take(conn));
+            Assert.Equal(OldId, IdAtFtsMatch(conn, "hot_memories", "zebracorn"));
+        }
+    }
+
+    [Fact]
+    public void AFaultAfterTheRekey_RollsTheRekeyBack()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedRekeySource(store, conn);
+            store.Insert(Tier.Warm, ContentType.Memory, new InsertEntryOpts("child one", ParentId: OldId, Id: "child-1"));
+            store.Insert(Tier.Cold, ContentType.Knowledge, new InsertEntryOpts("child two", ParentId: OldId, Id: "child-2"));
+            var before = StoreSnapshot.Take(conn);
+
+            using (var tx = store.BeginTransaction())
+            {
+                tx.BeforeStep = FailAt("rekey-parent");
+                var ex = Assert.Throws<InvalidOperationException>(() => tx.RekeyMemory(Tier.Hot, OldId, NewId));
+                Assert.Equal("injected at rekey-parent", ex.Message); // the fault, not a refusal
+            }
+
+            Assert.Equal(before, StoreSnapshot.Take(conn));
+            Assert.NotNull(store.Get(Tier.Hot, ContentType.Memory, OldId));
+            Assert.Null(store.Get(Tier.Hot, ContentType.Memory, NewId));
+            Assert.Equal(OldId, IdAtFtsMatch(conn, "hot_memories", "zebracorn"));
+            Assert.Equal(OldId, ParentOf(conn, "warm_memories", "child-1"));
+            Assert.Equal(OldId, ParentOf(conn, "cold_knowledge", "child-2"));
+        }
+    }
+
+    [Theory]
+    [InlineData("rekey-row")]
+    [InlineData("rekey-parent")]
+    public void FailureAtEachRekeyStep_RollsBack(string step) =>
+        AssertFailureRollsBack(step,
+            tx => tx.RekeyMemory(Tier.Hot, "id-1", "id-2"),
             store => SeedHot(store, "id-1", "x"));
 
     // One transaction that uses every operation, so the sweep covers every

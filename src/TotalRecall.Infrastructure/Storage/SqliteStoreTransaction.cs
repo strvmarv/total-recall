@@ -163,6 +163,40 @@ public sealed class SqliteStoreTransaction : IDisposable
         SqlRows.DeleteRow(_conn, tx, table, id);
     }
 
+    /// <summary>
+    /// Git sync alias convergence: the memory <paramref name="oldId"/> in <paramref name="tier"/> becomes
+    /// <paramref name="newId"/>. The row keeps its rowid, so its vector and FTS rows follow, and every other column
+    /// (<c>sticky</c>, <c>access_count</c>, <c>summary</c>, <c>source</c>, <c>metadata</c>, <c>decay_score</c>,
+    /// <c>tags</c>, the timestamps) stays; then <c>parent_id</c> of every content row naming <paramref name="oldId"/>
+    /// becomes <paramref name="newId"/>. Steps: <c>rekey-row</c>, <c>rekey-parent</c>. Throws
+    /// <see cref="InvalidOperationException"/> when <paramref name="oldId"/> has no row in <paramref name="tier"/>
+    /// or also has a row in another of the six content tables, or <paramref name="newId"/> is already an id in any of
+    /// the six content tables; nothing is written then.
+    /// </summary>
+    public void RekeyMemory(Tier tier, string oldId, string newId)
+    {
+        ArgumentNullException.ThrowIfNull(oldId);
+        ArgumentNullException.ThrowIfNull(newId);
+        var tx = Tx;
+        var table = MigrationRunner.TableName(tier, ContentType.Memory);
+        if (SqlRows.RowId(_conn, tx, table, oldId) is null)
+            throw new InvalidOperationException($"No entry '{oldId}' in {table}");
+        foreach (var (t, type) in MigrationRunner.AllTablePairs)
+        {
+            var other = MigrationRunner.TableName(t, type);
+            if (SqlRows.RowId(_conn, tx, other, newId) is not null)
+                throw new InvalidOperationException($"Cannot re-key '{oldId}': '{newId}' is already an id in {other}");
+            if (other != table && SqlRows.RowId(_conn, tx, other, oldId) is not null)
+                throw new InvalidOperationException($"Cannot re-key '{oldId}': it also has a row in {other}");
+        }
+
+        Step("rekey-row");
+        SqlRows.RekeyRow(_conn, tx, table, oldId, newId);
+        Step("rekey-parent");
+        foreach (var (t, type) in MigrationRunner.AllTablePairs)
+            SqlRows.RekeyParent(_conn, tx, MigrationRunner.TableName(t, type), oldId, newId);
+    }
+
     /// <summary>Set the sticky flag (hot only). Step: <c>set-sticky</c>.</summary>
     public void SetSticky(ContentType type, string id, bool sticky)
     {
